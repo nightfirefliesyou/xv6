@@ -126,13 +126,13 @@ kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
 // addresses on the stack.
 // assumes va is page aligned.
 uint64
-kvmpa(uint64 va)
+kvmpa(pagetable_t pagetable,uint64 va)
 {
   uint64 off = va % PGSIZE;
   pte_t *pte;
   uint64 pa;
   
-  pte = walk(kernel_pagetable, va, 0);
+  pte = walk(pagetable, va, 0);
   if(pte == 0)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
@@ -462,4 +462,32 @@ vmprint1(pagetable_t pagetable,int vmprintnum){
   void vmprint(pagetable_t pagetable){
     vmprint1(pagetable,0);
   }
+
+
+  void
+  uvmmap(pagetable_t userkernelpagetable,uint64 va, uint64 pa, uint64 sz, int perm)
+  {
+    if(mappages(userkernelpagetable, va, sz, pa, perm) != 0)
+      panic("uvmmap");
+  }
   
+  pagetable_t 
+  userkvminit(){
+  pagetable_t userkernelpagetable=uvmcreate();
+    if(userkernelpagetable==0)    return 0;
+    uvmmap(userkernelpagetable,UART0, UART0, PGSIZE, PTE_R | PTE_W);
+    uvmmap(userkernelpagetable,VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+    uvmmap(userkernelpagetable,CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+    uvmmap(userkernelpagetable,PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+    uvmmap(userkernelpagetable,KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+    uvmmap(userkernelpagetable,(uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+    uvmmap(userkernelpagetable,TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+    return userkernelpagetable;
+  }
+
+  void
+  uvminithart(pagetable_t userkernelpagetable)
+  {
+    w_satp(MAKE_SATP(userkernelpagetable));
+    sfence_vma();
+  }

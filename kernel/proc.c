@@ -34,12 +34,6 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
   }
   kvminithart();
 }
@@ -121,6 +115,19 @@ found:
     return 0;
   }
 
+  p->userkernelpagetable = userkvminit();
+  if(p->userkernelpagetable == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  char *pa = kalloc();
+      if(pa == 0)
+        panic("kalloc");
+      uint64 va = KSTACK((int)0);
+      uvmmap(p->userkernelpagetable,va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      p->kstack = va;
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -149,6 +156,11 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+  void *ukstack=(void*)kvmpa(p->userkernelpagetable,p->kstack);
+  kfree(ukstack);
+  p->kstack=0;
+  freeuserkernelpagetable(p->userkernelpagetable);
+  p->userkernelpagetable=0;
   p->state = UNUSED;
 }
 
@@ -473,8 +485,11 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        uvminithart(p->userkernelpagetable);
         swtch(&c->context, &p->context);
+        kvminithart();
 
+        
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
@@ -696,4 +711,18 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+void freeuserkernelpagetable(pagetable_t userkernelpagetable){
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = userkernelpagetable[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      freeuserkernelpagetable((pagetable_t)child);
+      userkernelpagetable[i]=0;
+    }
+  }
+  kfree((void*)userkernelpagetable);
 }
