@@ -183,6 +183,7 @@ int             copyinstr(pagetable_t, char *, uint64, uint64);
 void            uvmmap(pagetable_t,uint64 , uint64 , uint64 , int );
 pagetable_t     userkvminit(void);
 void            uvminithart(pagetable_t );
+int             userkvmcopy(pagetable_t,pagetable_t,uint64,uint64);
 
 // plic.c
 void            plicinit(void);
